@@ -1,0 +1,60 @@
+{
+  "version": 1,
+  "skills": {
+    "claude-command-converter": {
+      "source": "dceoy/speckit-agent-skills",
+      "sourceType": "github",
+      "computedHash": "a19d04c9f882f78ff98db31f98d903d5488a54fa48b22511a3b44d417373f294"
+    },
+    "speckit-analyze": {
+      "source": "dceoy/speckit-agent-skills",
+      "sourceType": "github",
+      "computedHash": "02d88c8c1a5415059ce7a99f469dca9e2735059f41d3d9bb18c5f08d986cbaef"
+    },
+    "speckit-baseline": {
+      "source": "dceoy/speckit-agent-skills",
+      "sourceType": "github",
+      "computedHash": "9583d1a121dd58eff1a3496a7921fbc73119f57fd761e1313ced622172f4c761"
+    },
+    "speckit-checklist": {
+      "source": "dceoy/speckit-agent-skills",
+      "sourceType": "github",
+      "computedHash": "caed5a41c25f76205ccaab27b6a7a46282e5d3441752aa5d3284f5c5a87e18d7"
+    },
+    "speckit-clarify": {
+      "source": "dceoy/speckit-agent-skills",
+      "sourceType": "github",
+      "computedHash": "69bb414dab3487b221372225139e1109c1932dd554cc2a5d945303cf1d4b8918"
+    },
+    "speckit-constitution": {
+      "source": "dceoy/speckit-agent-skills",
+      "sourceType": "github",
+      "computedHash": "6328bcd94d49564544b0a0f058844403575ea1f20c4517eddd1696a0fcf8192d"
+    },
+    "speckit-implement": {
+      "source": "dceoy/speckit-agent-skills",
+      "sourceType": "github",
+      "computedHash": "dfd8317878b0eeba63fb87a9ab2f9514fe1a66a99334a0bd5ab64108c71877df"
+    },
+    "speckit-plan": {
+      "source": "dceoy/speckit-agent-skills",
+      "sourceType": "github",
+      "computedHash": "6f85a690a8cd5322514063578c167e097737dd1de3ebd38e445b3702d6425cee"
+    },
+    "speckit-specify": {
+      "source": "dceoy/speckit-agent-skills",
+      "sourceType": "github",
+      "computedHash": "64a14756350c3ad02b13c86cc66e04bbb0570947331529ea3baf2c7e964f9a19"
+    },
+    "speckit-tasks": {
+      "source": "dceoy/speckit-agent-skills",
+      "sourceType": "github",
+      "computedHash": "a2e17ddf71d7faea47a73b2b359dace0e93435cc45fcd524c6ccbe721f496934"
+    },
+    "speckit-taskstoissues": {
+      "source": "dceoy/speckit-agent-skills",
+      "sourceType": "github",
+      "computedHash": "dceb9c8835fbf219faeec8cbb9402fe83937a1a09de684ebbd27b0199fdf5ebc"
+    }
+  }
+}
