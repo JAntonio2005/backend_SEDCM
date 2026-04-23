@@ -31,7 +31,18 @@
 
 *GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
 
-[Gates determined based on constitution file]
+- Messaging Architecture Gate: Plan MUST define MQTT topic strategy and event flows
+  without backend dependence on fixed edge node IPs.
+- Security Transport Gate: Plan MUST define MQTTS/TLS usage, secret handling, and
+  prohibition of plaintext control channels.
+- Reliability Gate: Plan MUST define reconnect strategy with exponential backoff,
+  idempotent command handling, and safe degradation behavior.
+- Safety Automation Gate: Plan MUST define deterministic escalation rules
+  (soft_reboot -> hard_shutdown) and manual recovery safety constraints.
+- Auditability Gate: Plan MUST include immutable command/ACK logging and real-time
+  observability path (e.g., WebSockets to dashboard).
+- Performance Gate: Plan MUST include measurable target for critical path latency
+  and a method to validate it.
 
 ## Project Structure
 

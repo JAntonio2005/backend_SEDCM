@@ -95,6 +95,25 @@
 - **FR-006**: System MUST authenticate users via [NEEDS CLARIFICATION: auth method not specified - email/password, SSO, OAuth?]
 - **FR-007**: System MUST retain user data for [NEEDS CLARIFICATION: retention period not specified]
 
+### Non-Functional Requirements *(mandatory)*
+
+- **NFR-001 Security**: System MUST protect telemetry and control channels with
+  encrypted transport and authenticated clients.
+- **NFR-002 Performance**: System MUST define and meet measurable latency targets
+  for critical decision and mitigation paths.
+- **NFR-003 Reliability**: System MUST recover automatically from transient network
+  failures using retry/backoff strategies.
+- **NFR-004 Observability**: System MUST provide immutable audit trails for critical
+  actions and expose real-time operational status.
+- **NFR-005 Deployability**: System MUST define reproducible deployment artifacts
+  and environment-specific configuration boundaries.
+
+### Operational Safety Constraints *(mandatory when automation/control exists)*
+
+- Define explicit preconditions for automated and manual mitigation commands.
+- Define blocked-action rules for unsafe environmental or system states.
+- Define escalation order and timeout windows for automated actions.
+
 ### Key Entities *(include if feature involves data)*
 
 - **[Entity 1]**: [What it represents, key attributes without implementation]
