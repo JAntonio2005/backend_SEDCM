@@ -4,6 +4,7 @@ import { startHttpServer } from "./bootstrap/http";
 import { connectMqttBroker } from "./bootstrap/mqtt";
 import { loadEnv } from "./config/env";
 import { activateTelemetrySubscriptions } from "./mqtt/subscriptions";
+import { closeDbPool, verifyDbConnection } from "./repositories/db";
 
 let httpServer: Server | undefined;
 let mqttClient: MqttClient | undefined;
@@ -27,11 +28,16 @@ async function shutdown(signal: string): Promise<void> {
     });
   }
 
+  await closeDbPool();
+
   process.exit(0);
 }
 
 async function main(): Promise<void> {
   const env = loadEnv();
+
+  await verifyDbConnection();
+  console.log(JSON.stringify({ level: "info", event: "db_connected" }));
 
   httpServer = await startHttpServer(env.httpPort);
   console.log(JSON.stringify({ level: "info", event: "http_started", port: env.httpPort }));
