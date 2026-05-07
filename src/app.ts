@@ -45,7 +45,10 @@ async function main(): Promise<void> {
   mqttClient = await connectMqttBroker(env);
   console.log(JSON.stringify({ level: "info", event: "mqtt_connected", broker: env.mqttUrl }));
 
-  await activateTelemetrySubscriptions({ client: mqttClient });
+  await activateTelemetrySubscriptions({
+    client: mqttClient,
+    nodeEscalationGraceMs: env.nodeEscalationGraceMs
+  });
   console.log(JSON.stringify({ level: "info", event: "mqtt_subscriptions_activated" }));
 }
 

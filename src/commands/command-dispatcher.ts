@@ -3,12 +3,16 @@ import { MqttClient } from "mqtt";
 import { EnvironmentTelemetryNormalized } from "../ingest/normalizers/environment-telemetry.normalizer";
 import { NodeTelemetryNormalized } from "../ingest/normalizers/node-telemetry.normalizer";
 import {
+  getLatestNodeCommandWithinWindow,
+  hasRecentNodeCommandByStatuses,
   hasRecentPendingCommand,
   insertCommandAuditRecord
 } from "../repositories/command-audit.repository";
 import { RuleStatus } from "../rules/rules-engine";
 
 const PENDING_DEDUP_WINDOW_SECONDS = 300;
+const RECENT_NODE_COMMAND_WINDOW_SECONDS = 300;
+const DEFAULT_NODE_ESCALATION_GRACE_MS = 30000;
 
 type CommandAction = "soft_reboot" | "hard_shutdown" | "set_hvac_mode";
 type CommandTargetType = "nodo" | "rack";
@@ -232,30 +236,157 @@ async function dispatchWithAudit(args: {
   }
 }
 
+function buildNodeSoftRebootDescriptor(args: {
+  zoneCode: string;
+  rackCode: string;
+  nodeId: string;
+}): CommandDescriptor {
+  return {
+    zoneCode: args.zoneCode,
+    rackCode: args.rackCode,
+    nodeId: args.nodeId,
+    targetType: "nodo",
+    targetId: args.nodeId,
+    action: "soft_reboot",
+    reason: "node_critical_soft_reboot"
+  };
+}
+
+function buildNodeHardShutdownDescriptor(args: {
+  zoneCode: string;
+  rackCode: string;
+  nodeId: string;
+}): CommandDescriptor {
+  return {
+    zoneCode: args.zoneCode,
+    rackCode: args.rackCode,
+    nodeId: args.nodeId,
+    targetType: "nodo",
+    targetId: args.nodeId,
+    action: "hard_shutdown",
+    reason: "node_critical_persistent_hard_shutdown"
+  };
+}
+
 export async function dispatchNodeCommandIfNeeded(args: {
   client: MqttClient;
   telemetry: NodeTelemetryNormalized;
   status: RuleStatus;
   topic: string;
+  escalationGraceMs?: number;
 }): Promise<void> {
   if (args.status !== "Critico") return;
 
-  const descriptor: CommandDescriptor = {
-    zoneCode: args.telemetry.metadata.dc_zone,
-    rackCode: args.telemetry.metadata.dc_rack,
-    nodeId: args.telemetry.metadata.node_id,
-    targetType: "nodo",
-    targetId: args.telemetry.metadata.node_id,
-    action: "soft_reboot",
-    reason: "node_critical_soft_reboot"
-  };
+  const graceMs =
+    typeof args.escalationGraceMs === "number" && args.escalationGraceMs > 0
+      ? args.escalationGraceMs
+      : DEFAULT_NODE_ESCALATION_GRACE_MS;
 
-  await dispatchWithAudit({
-    client: args.client,
-    descriptor,
-    source: "node",
-    topic: args.topic
-  });
+  const nodeId = args.telemetry.metadata.node_id;
+  const zoneCode = args.telemetry.metadata.dc_zone;
+  const rackCode = args.telemetry.metadata.dc_rack;
+
+  try {
+    const latestSoft = await getLatestNodeCommandWithinWindow({
+      nodeId,
+      action: "soft_reboot",
+      windowSeconds: RECENT_NODE_COMMAND_WINDOW_SECONDS
+    });
+
+    const hasRecentBlockingHardShutdown = await hasRecentNodeCommandByStatuses({
+      nodeId,
+      action: "hard_shutdown",
+      statuses: ["PENDING", "ACKED"],
+      windowSeconds: RECENT_NODE_COMMAND_WINDOW_SECONDS
+    });
+
+    console.log(
+      JSON.stringify({
+        level: "info",
+        event: "escalation_evaluated",
+        node_id: nodeId,
+        status: args.status,
+        grace_ms: graceMs,
+        latest_soft_reboot_command_id: latestSoft?.commandId ?? null,
+        latest_soft_reboot_ack_status: latestSoft?.ackStatus ?? null,
+        latest_soft_reboot_age_ms: latestSoft?.ageMs ?? null,
+        has_recent_blocking_hard_shutdown: hasRecentBlockingHardShutdown
+      })
+    );
+
+    if (!latestSoft) {
+      console.log(
+        JSON.stringify({
+          level: "info",
+          event: "escalation_soft_reboot_selected",
+          node_id: nodeId,
+          reason: "no_recent_soft_reboot"
+        })
+      );
+
+      await dispatchWithAudit({
+        client: args.client,
+        descriptor: buildNodeSoftRebootDescriptor({ zoneCode, rackCode, nodeId }),
+        source: "node",
+        topic: args.topic
+      });
+      return;
+    }
+
+    if (hasRecentBlockingHardShutdown) {
+      console.log(
+        JSON.stringify({
+          level: "info",
+          event: "escalation_skipped_existing_hard_shutdown",
+          node_id: nodeId
+        })
+      );
+      return;
+    }
+
+    if (latestSoft.ageMs < graceMs) {
+      console.log(
+        JSON.stringify({
+          level: "info",
+          event: "escalation_waiting_grace_period",
+          node_id: nodeId,
+          soft_reboot_command_id: latestSoft.commandId,
+          soft_reboot_ack_status: latestSoft.ackStatus,
+          soft_reboot_age_ms: latestSoft.ageMs,
+          grace_ms: graceMs
+        })
+      );
+      return;
+    }
+
+    console.log(
+      JSON.stringify({
+        level: "info",
+        event: "escalation_hard_shutdown_selected",
+        node_id: nodeId,
+        based_on_soft_reboot_command_id: latestSoft.commandId,
+        based_on_soft_reboot_ack_status: latestSoft.ackStatus,
+        soft_reboot_age_ms: latestSoft.ageMs
+      })
+    );
+
+    await dispatchWithAudit({
+      client: args.client,
+      descriptor: buildNodeHardShutdownDescriptor({ zoneCode, rackCode, nodeId }),
+      source: "node",
+      topic: args.topic
+    });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(
+      JSON.stringify({
+        level: "error",
+        event: "escalation_failed",
+        node_id: nodeId,
+        message
+      })
+    );
+  }
 }
 
 export async function dispatchEnvironmentCommandIfNeeded(args: {

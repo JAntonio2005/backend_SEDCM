@@ -23,7 +23,10 @@ import { routeTelemetryMessage, TelemetryTopicHandlers } from "./router";
 
 export const TELEMETRY_SUBSCRIPTION_FILTER = "dc/telemetria/#";
 
-function createDefaultHandlers(client: MqttClient): TelemetryTopicHandlers {
+function createDefaultHandlers(
+  client: MqttClient,
+  nodeEscalationGraceMs: number
+): TelemetryTopicHandlers {
   const dedupeTracker = createDedupeTracker();
   const nodeLastEventByStream = new Map<string, number>();
   const environmentLastEventByStream = new Map<string, number>();
@@ -158,7 +161,8 @@ function createDefaultHandlers(client: MqttClient): TelemetryTopicHandlers {
             client,
             telemetry: normalized,
             status: evaluatedStatus,
-            topic
+            topic,
+            escalationGraceMs: nodeEscalationGraceMs
           });
         } catch (error: unknown) {
           const message = error instanceof Error ? error.message : String(error);
@@ -350,10 +354,11 @@ function createDefaultHandlers(client: MqttClient): TelemetryTopicHandlers {
 
 export async function activateTelemetrySubscriptions(args: {
   client: MqttClient;
+  nodeEscalationGraceMs: number;
   handlers?: Partial<TelemetryTopicHandlers>;
 }): Promise<void> {
   const handlers: TelemetryTopicHandlers = {
-    ...createDefaultHandlers(args.client),
+    ...createDefaultHandlers(args.client, args.nodeEscalationGraceMs),
     ...args.handlers
   };
 
