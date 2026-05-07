@@ -10,3 +10,8 @@ Thumbs.db
 *.swp
 .vscode/
 .idea/
+
+# Local tooling / agent artifacts
+.venv/
+.agents/
+tmp3-sub-listener.js
