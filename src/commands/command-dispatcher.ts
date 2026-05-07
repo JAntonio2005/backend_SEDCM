@@ -8,6 +8,7 @@ import {
   hasRecentPendingCommand,
   insertCommandAuditRecord
 } from "../repositories/command-audit.repository";
+import { broadcastRealtimeEvent } from "../realtime/ws-server";
 import { RuleStatus } from "../rules/rules-engine";
 
 const PENDING_DEDUP_WINDOW_SECONDS = 300;
@@ -199,6 +200,21 @@ async function dispatchWithAudit(args: {
       })
     );
 
+    broadcastRealtimeEvent({
+      type: "command_published",
+      data: {
+        command_id: commandId,
+        mqtt_topic: mqttTopic,
+        action: args.descriptor.action,
+        reason: args.descriptor.reason,
+        target_type: args.descriptor.targetType,
+        target_id: args.descriptor.targetId,
+        zone_code: args.descriptor.zoneCode,
+        rack_code: args.descriptor.rackCode,
+        node_id: args.descriptor.nodeId
+      }
+    });
+
     await insertCommandAuditRecord({
       commandId,
       zoneCode: args.descriptor.zoneCode,
@@ -314,6 +330,22 @@ export async function dispatchNodeCommandIfNeeded(args: {
       })
     );
 
+    broadcastRealtimeEvent({
+      type: "escalation_event",
+      data: {
+        stage: "evaluated",
+        node_id: nodeId,
+        zone_code: zoneCode,
+        rack_code: rackCode,
+        status: args.status,
+        grace_ms: graceMs,
+        latest_soft_reboot_command_id: latestSoft?.commandId ?? null,
+        latest_soft_reboot_ack_status: latestSoft?.ackStatus ?? null,
+        latest_soft_reboot_age_ms: latestSoft?.ageMs ?? null,
+        has_recent_blocking_hard_shutdown: hasRecentBlockingHardShutdown
+      }
+    });
+
     if (!latestSoft) {
       console.log(
         JSON.stringify({
@@ -323,6 +355,17 @@ export async function dispatchNodeCommandIfNeeded(args: {
           reason: "no_recent_soft_reboot"
         })
       );
+
+      broadcastRealtimeEvent({
+        type: "escalation_event",
+        data: {
+          stage: "soft_reboot_selected",
+          node_id: nodeId,
+          zone_code: zoneCode,
+          rack_code: rackCode,
+          reason: "no_recent_soft_reboot"
+        }
+      });
 
       await dispatchWithAudit({
         client: args.client,
@@ -341,6 +384,16 @@ export async function dispatchNodeCommandIfNeeded(args: {
           node_id: nodeId
         })
       );
+
+      broadcastRealtimeEvent({
+        type: "escalation_event",
+        data: {
+          stage: "skipped_existing_hard_shutdown",
+          node_id: nodeId,
+          zone_code: zoneCode,
+          rack_code: rackCode
+        }
+      });
       return;
     }
 
@@ -356,6 +409,20 @@ export async function dispatchNodeCommandIfNeeded(args: {
           grace_ms: graceMs
         })
       );
+
+      broadcastRealtimeEvent({
+        type: "escalation_event",
+        data: {
+          stage: "waiting_grace_period",
+          node_id: nodeId,
+          zone_code: zoneCode,
+          rack_code: rackCode,
+          soft_reboot_command_id: latestSoft.commandId,
+          soft_reboot_ack_status: latestSoft.ackStatus,
+          soft_reboot_age_ms: latestSoft.ageMs,
+          grace_ms: graceMs
+        }
+      });
       return;
     }
 
@@ -369,6 +436,19 @@ export async function dispatchNodeCommandIfNeeded(args: {
         soft_reboot_age_ms: latestSoft.ageMs
       })
     );
+
+    broadcastRealtimeEvent({
+      type: "escalation_event",
+      data: {
+        stage: "hard_shutdown_selected",
+        node_id: nodeId,
+        zone_code: zoneCode,
+        rack_code: rackCode,
+        based_on_soft_reboot_command_id: latestSoft.commandId,
+        based_on_soft_reboot_ack_status: latestSoft.ackStatus,
+        soft_reboot_age_ms: latestSoft.ageMs
+      }
+    });
 
     await dispatchWithAudit({
       client: args.client,
@@ -386,6 +466,17 @@ export async function dispatchNodeCommandIfNeeded(args: {
         message
       })
     );
+
+    broadcastRealtimeEvent({
+      type: "escalation_event",
+      data: {
+        stage: "failed",
+        node_id: nodeId,
+        zone_code: zoneCode,
+        rack_code: rackCode,
+        message
+      }
+    });
   }
 }
 

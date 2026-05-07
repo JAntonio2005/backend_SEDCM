@@ -8,6 +8,7 @@ import {
   fetchRacks,
   normalizeLimit
 } from "../repositories/query.repository";
+import { startWebSocketServer } from "../realtime/ws-server";
 
 function sendJson(res: ServerResponse, statusCode: number, payload: unknown): void {
   res.writeHead(statusCode, { "content-type": "application/json; charset=utf-8" });
@@ -131,6 +132,8 @@ export async function startHttpServer(port: number): Promise<Server> {
     server.once("error", reject);
     server.listen(port, () => resolve());
   });
+
+  startWebSocketServer(server);
 
   return server;
 }

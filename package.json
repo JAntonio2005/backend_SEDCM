@@ -16,11 +16,13 @@
   "dependencies": {
     "mqtt": "^5.14.1",
     "pg": "^8.16.0",
-    "speckit": "^0.1.0"
+    "speckit": "^0.1.0",
+    "ws": "^8.20.0"
   },
   "devDependencies": {
     "@types/node": "^22.15.3",
     "@types/pg": "^8.20.0",
+    "@types/ws": "^8.18.1",
     "tsx": "^4.20.6",
     "typescript": "^5.8.3"
   }

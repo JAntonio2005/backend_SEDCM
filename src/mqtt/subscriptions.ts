@@ -18,6 +18,7 @@ import {
   evaluateNodeStatus,
   evaluateRackEnvironmentStatus
 } from "../rules/rules-engine";
+import { broadcastRealtimeEvent } from "../realtime/ws-server";
 import { ACK_SUBSCRIPTION_FILTER, handleAckMessage } from "./ack-handler";
 import { routeTelemetryMessage, TelemetryTopicHandlers } from "./router";
 
@@ -127,6 +128,16 @@ function createDefaultHandlers(
           })
         );
 
+        broadcastRealtimeEvent({
+          type: "telemetry_node_received",
+          data: {
+            topic,
+            timestamp: normalized.timestamp,
+            metadata: normalized.metadata,
+            metrics: normalized.metrics
+          }
+        });
+
         try {
           const evaluatedStatus = evaluateNodeStatus(normalized);
           console.log(
@@ -155,6 +166,17 @@ function createDefaultHandlers(
                 new_status: evaluatedStatus
               })
             );
+
+            broadcastRealtimeEvent({
+              type: "node_status_changed",
+              data: {
+                node_id: normalized.metadata.node_id,
+                zone_code: normalized.metadata.dc_zone,
+                rack_code: normalized.metadata.dc_rack,
+                previous_status: updated.previousStatus,
+                new_status: evaluatedStatus
+              }
+            });
           }
 
           await dispatchNodeCommandIfNeeded({
@@ -284,6 +306,16 @@ function createDefaultHandlers(
           })
         );
 
+        broadcastRealtimeEvent({
+          type: "telemetry_environment_received",
+          data: {
+            topic,
+            timestamp: normalized.timestamp,
+            metadata: normalized.metadata,
+            environment: normalized.environment
+          }
+        });
+
         try {
           const evaluatedStatus = evaluateRackEnvironmentStatus(normalized);
           console.log(
@@ -315,6 +347,16 @@ function createDefaultHandlers(
                 new_status: evaluatedStatus
               })
             );
+
+            broadcastRealtimeEvent({
+              type: "rack_status_changed",
+              data: {
+                zone_code: normalized.metadata.dc_zone,
+                rack_code: normalized.metadata.dc_rack,
+                previous_status: updated.previousStatus,
+                new_status: evaluatedStatus
+              }
+            });
           }
 
           await dispatchEnvironmentCommandIfNeeded({

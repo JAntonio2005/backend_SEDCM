@@ -1,4 +1,5 @@
 import { updateCommandAckRecord } from "../repositories/command-audit.repository";
+import { broadcastRealtimeEvent } from "../realtime/ws-server";
 
 export const ACK_SUBSCRIPTION_FILTER = "dc/ack/#";
 
@@ -220,6 +221,18 @@ export async function handleAckMessage(args: {
       status: validated.value.status
     })
   );
+
+  broadcastRealtimeEvent({
+    type: "command_ack_received",
+    data: {
+      topic: args.topic,
+      zone_code: parsedTopic.zoneCode,
+      rack_code: parsedTopic.rackCode,
+      command_id: validated.value.commandId,
+      status: validated.value.status,
+      timestamp_ack: validated.value.timestampAck
+    }
+  });
 
   try {
     const updated = await updateCommandAckRecord({
