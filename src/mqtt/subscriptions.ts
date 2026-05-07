@@ -18,6 +18,7 @@ import {
   evaluateNodeStatus,
   evaluateRackEnvironmentStatus
 } from "../rules/rules-engine";
+import { ACK_SUBSCRIPTION_FILTER, handleAckMessage } from "./ack-handler";
 import { routeTelemetryMessage, TelemetryTopicHandlers } from "./router";
 
 export const TELEMETRY_SUBSCRIPTION_FILTER = "dc/telemetria/#";
@@ -356,31 +357,43 @@ export async function activateTelemetrySubscriptions(args: {
     ...args.handlers
   };
 
-  await new Promise<void>((resolve, reject) => {
-    args.client.subscribe(TELEMETRY_SUBSCRIPTION_FILTER, { qos: 0 }, (error) => {
-      if (error) {
-        reject(error);
-        return;
-      }
-      resolve();
+  const subscribeFilter = async (filter: string): Promise<void> => {
+    await new Promise<void>((resolve, reject) => {
+      args.client.subscribe(filter, { qos: 0 }, (error) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+        resolve();
+      });
     });
-  });
+  };
+
+  await subscribeFilter(TELEMETRY_SUBSCRIPTION_FILTER);
+  await subscribeFilter(ACK_SUBSCRIPTION_FILTER);
 
   args.client.on("message", (topic: string, payload: Buffer) => {
-    void routeTelemetryMessage({
-      topic,
-      payload,
-      handlers
-    }).catch((error: unknown) => {
-      const message = error instanceof Error ? error.message : String(error);
-      console.error(
-        JSON.stringify({
-          level: "error",
-          event: "mqtt_route_failed",
-          topic,
-          message
-        })
-      );
-    });
+    if (topic.startsWith("dc/telemetria/")) {
+      void routeTelemetryMessage({
+        topic,
+        payload,
+        handlers
+      }).catch((error: unknown) => {
+        const message = error instanceof Error ? error.message : String(error);
+        console.error(
+          JSON.stringify({
+            level: "error",
+            event: "mqtt_route_failed",
+            topic,
+            message
+          })
+        );
+      });
+      return;
+    }
+
+    if (topic.startsWith("dc/ack/")) {
+      void handleAckMessage({ topic, payload });
+    }
   });
 }

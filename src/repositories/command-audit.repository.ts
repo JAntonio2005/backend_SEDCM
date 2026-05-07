@@ -13,6 +13,8 @@ export type CommandAuditRecord = {
   issuedAt: string;
 };
 
+export type CommandAckStatus = "ACKED" | "FAILED";
+
 export async function hasRecentPendingCommand(args: {
   zoneCode: string;
   rackCode: string;
@@ -89,5 +91,28 @@ export async function insertCommandAuditRecord(record: CommandAuditRecord): Prom
         record.issuedAt
       ]
     );
+  });
+}
+
+export async function updateCommandAckRecord(args: {
+  commandId: string;
+  ackStatus: CommandAckStatus;
+  timestampAck: string | null;
+  ackPayload: Record<string, unknown>;
+}): Promise<boolean> {
+  return withDbClient(async (client) => {
+    const result = await client.query(
+      `
+        UPDATE audit_command_log
+        SET
+          ack_status = $2,
+          ack_received_at = COALESCE($3::timestamptz, now()),
+          ack_payload = $4::jsonb
+        WHERE command_id = $1
+      `,
+      [args.commandId, args.ackStatus, args.timestampAck, JSON.stringify(args.ackPayload)]
+    );
+
+    return (result.rowCount ?? 0) > 0;
   });
 }
