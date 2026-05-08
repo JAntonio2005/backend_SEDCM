@@ -68,5 +68,21 @@ services:
       retries: 10
       start_period: 15s
 
+  edge-executor-a1:
+    build:
+      context: ./edge-executor
+      dockerfile: Dockerfile
+    container_name: sedcm-edge-executor-a1
+    depends_on:
+      mosquitto:
+        condition: service_healthy
+    environment:
+      MQTT_URL: mqtt://mosquitto:1883
+      EDGE_ZONE: A
+      EDGE_RACK: A1
+      EXECUTOR_ID: executor-A1
+      ACK_DELAY_MS: 500
+      ACK_MODE: ACKED
+
 volumes:
   pgdata:
