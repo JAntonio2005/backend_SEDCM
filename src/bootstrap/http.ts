@@ -1,4 +1,4 @@
-﻿import http, { IncomingMessage, Server, ServerResponse } from "node:http";
+import http, { IncomingMessage, Server, ServerResponse } from "node:http";
 import {
   fetchAuditCommands,
   fetchEnvironmentTelemetry,
@@ -10,13 +10,76 @@ import {
 } from "../repositories/query.repository";
 import { startWebSocketServer } from "../realtime/ws-server";
 
-function sendJson(res: ServerResponse, statusCode: number, payload: unknown): void {
+type CorsConfig = {
+  allowAny: boolean;
+  allowedOrigins: string[];
+  allowedOriginsSet: Set<string>;
+};
+
+function parseCorsConfig(raw: string): CorsConfig {
+  const trimmed = raw.trim();
+
+  if (trimmed === "*") {
+    return {
+      allowAny: true,
+      allowedOrigins: [],
+      allowedOriginsSet: new Set<string>()
+    };
+  }
+
+  const allowedOrigins = trimmed
+    .split(",")
+    .map((origin) => origin.trim())
+    .filter((origin) => origin !== "");
+
+  return {
+    allowAny: false,
+    allowedOrigins,
+    allowedOriginsSet: new Set(allowedOrigins)
+  };
+}
+
+function resolveAllowOrigin(req: IncomingMessage, cors: CorsConfig): string {
+  if (cors.allowAny) return "*";
+
+  const requestOrigin = req.headers.origin;
+  if (typeof requestOrigin === "string" && cors.allowedOriginsSet.has(requestOrigin)) {
+    return requestOrigin;
+  }
+
+  return cors.allowedOrigins[0] ?? "http://127.0.0.1:5173";
+}
+
+function applyCorsHeaders(req: IncomingMessage, res: ServerResponse, cors: CorsConfig): void {
+  const allowOrigin = resolveAllowOrigin(req, cors);
+
+  res.setHeader("Access-Control-Allow-Origin", allowOrigin);
+  res.setHeader("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type,Authorization");
+  res.setHeader("Vary", "Origin");
+}
+
+function sendJson(
+  req: IncomingMessage,
+  res: ServerResponse,
+  cors: CorsConfig,
+  statusCode: number,
+  payload: unknown
+): void {
+  applyCorsHeaders(req, res, cors);
   res.writeHead(statusCode, { "content-type": "application/json; charset=utf-8" });
   res.end(JSON.stringify(payload));
 }
 
-function sendError(res: ServerResponse, statusCode: number, error: string, detail?: string): void {
-  sendJson(res, statusCode, {
+function sendError(
+  req: IncomingMessage,
+  res: ServerResponse,
+  cors: CorsConfig,
+  statusCode: number,
+  error: string,
+  detail?: string
+): void {
+  sendJson(req, res, cors, statusCode, {
     error,
     ...(detail ? { detail } : {})
   });
@@ -29,33 +92,34 @@ function asOptionalQueryParam(url: URL, key: string): string | null {
   return trimmed === "" ? null : trimmed;
 }
 
-function healthcheck(_req: IncomingMessage, res: ServerResponse): void {
-  sendJson(res, 200, { status: "ok", service: "backend-sedcm-ingesta" });
-}
-
-async function handleApiV1Request(req: IncomingMessage, res: ServerResponse, url: URL): Promise<void> {
+async function handleApiV1Request(
+  req: IncomingMessage,
+  res: ServerResponse,
+  url: URL,
+  cors: CorsConfig
+): Promise<void> {
   if (req.method !== "GET") {
-    sendError(res, 405, "method_not_allowed");
+    sendError(req, res, cors, 405, "method_not_allowed");
     return;
   }
 
   if (url.pathname === "/api/v1/inventory") {
     const zones = await fetchInventoryHierarchy();
-    sendJson(res, 200, { zones });
+    sendJson(req, res, cors, 200, { zones });
     return;
   }
 
   if (url.pathname === "/api/v1/nodes") {
     const limit = normalizeLimit(asOptionalQueryParam(url, "limit"));
     const items = await fetchNodes(limit);
-    sendJson(res, 200, { items, limit });
+    sendJson(req, res, cors, 200, { items, limit });
     return;
   }
 
   if (url.pathname === "/api/v1/racks") {
     const limit = normalizeLimit(asOptionalQueryParam(url, "limit"));
     const items = await fetchRacks(limit);
-    sendJson(res, 200, { items, limit });
+    sendJson(req, res, cors, 200, { items, limit });
     return;
   }
 
@@ -68,7 +132,7 @@ async function handleApiV1Request(req: IncomingMessage, res: ServerResponse, url
       limit
     });
 
-    sendJson(res, 200, { items, limit });
+    sendJson(req, res, cors, 200, { items, limit });
     return;
   }
 
@@ -80,7 +144,7 @@ async function handleApiV1Request(req: IncomingMessage, res: ServerResponse, url
       limit
     });
 
-    sendJson(res, 200, { items, limit });
+    sendJson(req, res, cors, 200, { items, limit });
     return;
   }
 
@@ -95,42 +159,55 @@ async function handleApiV1Request(req: IncomingMessage, res: ServerResponse, url
       limit
     });
 
-    sendJson(res, 200, { items, limit });
+    sendJson(req, res, cors, 200, { items, limit });
     return;
   }
 
-  sendError(res, 404, "not_found");
+  sendError(req, res, cors, 404, "not_found");
 }
 
-async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
+async function handleRequest(
+  req: IncomingMessage,
+  res: ServerResponse,
+  cors: CorsConfig
+): Promise<void> {
   try {
+    if (req.method === "OPTIONS") {
+      applyCorsHeaders(req, res, cors);
+      res.writeHead(204);
+      res.end();
+      return;
+    }
+
     const url = new URL(req.url ?? "/", "http://127.0.0.1");
 
     if (req.method === "GET" && url.pathname === "/health") {
-      healthcheck(req, res);
+      sendJson(req, res, cors, 200, { status: "ok", service: "backend-sedcm-ingesta" });
       return;
     }
 
     if (url.pathname.startsWith("/api/v1/")) {
-      await handleApiV1Request(req, res, url);
+      await handleApiV1Request(req, res, url, cors);
       return;
     }
 
-    sendError(res, 404, "not_found");
+    sendError(req, res, cors, 404, "not_found");
   } catch (error: unknown) {
     const detail = error instanceof Error ? error.message : String(error);
-    sendError(res, 500, "internal_server_error", detail);
+    sendError(req, res, cors, 500, "internal_server_error", detail);
   }
 }
 
-export async function startHttpServer(port: number): Promise<Server> {
+export async function startHttpServer(args: { port: number; corsOrigin: string }): Promise<Server> {
+  const cors = parseCorsConfig(args.corsOrigin);
+
   const server = http.createServer((req, res) => {
-    void handleRequest(req, res);
+    void handleRequest(req, res, cors);
   });
 
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
-    server.listen(port, () => resolve());
+    server.listen(args.port, () => resolve());
   });
 
   startWebSocketServer(server);

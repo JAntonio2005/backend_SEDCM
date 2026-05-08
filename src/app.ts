@@ -39,7 +39,10 @@ async function main(): Promise<void> {
   await verifyDbConnection();
   console.log(JSON.stringify({ level: "info", event: "db_connected" }));
 
-  httpServer = await startHttpServer(env.httpPort);
+  httpServer = await startHttpServer({
+    port: env.httpPort,
+    corsOrigin: env.corsOrigin
+  });
   console.log(JSON.stringify({ level: "info", event: "http_started", port: env.httpPort }));
 
   mqttClient = await connectMqttBroker(env);

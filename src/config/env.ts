@@ -1,5 +1,6 @@
 export type AppEnv = {
   httpPort: number;
+  corsOrigin: string;
   mqttUrl: string;
   mqttClientId: string;
   mqttConnectTimeoutMs: number;
@@ -28,6 +29,9 @@ function getNumber(name: string, fallback: number): number {
 export function loadEnv(): AppEnv {
   return {
     httpPort: getNumber("HTTP_PORT", 3000),
+    corsOrigin:
+      process.env.CORS_ORIGIN?.trim() ||
+      "http://127.0.0.1:5173,http://localhost:5173",
     mqttUrl: getRequired("MQTT_URL"),
     mqttClientId: process.env.MQTT_CLIENT_ID?.trim() || "backend-sedcm-ingesta",
     mqttConnectTimeoutMs: getNumber("MQTT_CONNECT_TIMEOUT_MS", 5000),
