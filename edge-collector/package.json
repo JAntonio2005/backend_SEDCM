@@ -1,0 +1,13 @@
+{
+  "name": "sedcm-edge-collector",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Edge Collector minimo simulado para SEDCM",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js"
+  },
+  "dependencies": {
+    "mqtt": "^5.14.1"
+  }
+}
