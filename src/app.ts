@@ -41,7 +41,8 @@ async function main(): Promise<void> {
 
   httpServer = await startHttpServer({
     port: env.httpPort,
-    corsOrigin: env.corsOrigin
+    corsOrigin: env.corsOrigin,
+    getMqttClient: () => mqttClient
   });
   console.log(JSON.stringify({ level: "info", event: "http_started", port: env.httpPort }));
 

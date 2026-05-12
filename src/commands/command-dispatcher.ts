@@ -18,14 +18,22 @@ const DEFAULT_NODE_ESCALATION_GRACE_MS = 30000;
 type CommandAction = "soft_reboot" | "hard_shutdown" | "set_hvac_mode";
 type CommandTargetType = "nodo" | "rack";
 
-type CommandDescriptor = {
+export type CommandDescriptor = {
   zoneCode: string;
   rackCode: string;
   nodeId: string | null;
   targetType: CommandTargetType;
   targetId: string;
   action: CommandAction;
+  mode?: string | null;
   reason: string;
+};
+
+export type CommandDispatchResult = {
+  commandId: string;
+  action: CommandAction;
+  mqttTopic: string;
+  ackStatus: "PENDING";
 };
 
 function buildCommandTopic(zoneCode: string, rackCode: string): string {
@@ -37,7 +45,7 @@ function buildPayload(args: {
   issuedAt: string;
   descriptor: CommandDescriptor;
 }): Record<string, unknown> {
-  return {
+  const payload: Record<string, unknown> = {
     command_id: args.commandId,
     timestamp_issued: args.issuedAt,
     target: {
@@ -49,6 +57,12 @@ function buildPayload(args: {
     action: args.descriptor.action,
     reason: args.descriptor.reason
   };
+
+  if (args.descriptor.mode) {
+    payload.mode = args.descriptor.mode;
+  }
+
+  return payload;
 }
 
 function publishCommand(args: {
@@ -130,9 +144,10 @@ function selectEnvironmentCommand(args: {
 async function dispatchWithAudit(args: {
   client: MqttClient;
   descriptor: CommandDescriptor;
-  source: "node" | "environment";
-  topic: string;
-}): Promise<void> {
+  source: "node" | "environment" | "manual";
+  topic: string | null;
+  skipPendingDedupe?: boolean;
+}): Promise<CommandDispatchResult | null> {
   const mqttTopic = buildCommandTopic(args.descriptor.zoneCode, args.descriptor.rackCode);
   const issuedAt = new Date().toISOString();
   const commandId = randomUUID();
@@ -157,30 +172,32 @@ async function dispatchWithAudit(args: {
   );
 
   try {
-    const skip = await hasRecentPendingCommand({
-      zoneCode: args.descriptor.zoneCode,
-      rackCode: args.descriptor.rackCode,
-      nodeId: args.descriptor.nodeId,
-      targetType: args.descriptor.targetType,
-      action: args.descriptor.action,
-      reason: args.descriptor.reason,
-      windowSeconds: PENDING_DEDUP_WINDOW_SECONDS
-    });
+    if (args.skipPendingDedupe !== false) {
+      const skip = await hasRecentPendingCommand({
+        zoneCode: args.descriptor.zoneCode,
+        rackCode: args.descriptor.rackCode,
+        nodeId: args.descriptor.nodeId,
+        targetType: args.descriptor.targetType,
+        action: args.descriptor.action,
+        reason: args.descriptor.reason,
+        windowSeconds: PENDING_DEDUP_WINDOW_SECONDS
+      });
 
-    if (skip) {
-      console.log(
-        JSON.stringify({
-          level: "info",
-          event: "command_dispatch_skipped",
-          source: args.source,
-          mqtt_topic: mqttTopic,
-          action: args.descriptor.action,
-          target_type: args.descriptor.targetType,
-          target_id: args.descriptor.targetId,
-          reason: args.descriptor.reason
-        })
-      );
-      return;
+      if (skip) {
+        console.log(
+          JSON.stringify({
+            level: "info",
+            event: "command_dispatch_skipped",
+            source: args.source,
+            mqtt_topic: mqttTopic,
+            action: args.descriptor.action,
+            target_type: args.descriptor.targetType,
+            target_id: args.descriptor.targetId,
+            reason: args.descriptor.reason
+          })
+        );
+        return null;
+      }
     }
 
     await publishCommand({
@@ -206,6 +223,7 @@ async function dispatchWithAudit(args: {
         command_id: commandId,
         mqtt_topic: mqttTopic,
         action: args.descriptor.action,
+        mode: args.descriptor.mode ?? null,
         reason: args.descriptor.reason,
         target_type: args.descriptor.targetType,
         target_id: args.descriptor.targetId,
@@ -236,6 +254,12 @@ async function dispatchWithAudit(args: {
         command_id: commandId
       })
     );
+    return {
+      commandId,
+      action: args.descriptor.action,
+      mqttTopic,
+      ackStatus: "PENDING"
+    };
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
     console.error(
@@ -249,6 +273,7 @@ async function dispatchWithAudit(args: {
         message
       })
     );
+    throw error;
   }
 }
 
@@ -498,4 +523,23 @@ export async function dispatchEnvironmentCommandIfNeeded(args: {
     source: "environment",
     topic: args.topic
   });
+}
+
+export async function dispatchManualCommand(args: {
+  client: MqttClient;
+  descriptor: CommandDescriptor;
+}): Promise<CommandDispatchResult> {
+  const result = await dispatchWithAudit({
+    client: args.client,
+    descriptor: args.descriptor,
+    source: "manual",
+    topic: null,
+    skipPendingDedupe: false
+  });
+
+  if (!result) {
+    throw new Error("manual_command_not_published");
+  }
+
+  return result;
 }
