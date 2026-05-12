@@ -3,6 +3,7 @@ import { NodeTelemetryNormalized } from "../ingest/normalizers/node-telemetry.no
 import { withDbClient } from "../repositories/db";
 
 export type RuleStatus = "Normal" | "Warning" | "Critico";
+export type InventoryStatus = RuleStatus | "OFFLINE";
 
 const CPU_WARNING_THRESHOLD = 80;
 const CPU_CRITICAL_THRESHOLD = 95;
@@ -57,9 +58,9 @@ export function evaluateRackEnvironmentStatus(
 export async function applyNodeStatus(args: {
   nodeId: string;
   status: RuleStatus;
-}): Promise<{ previousStatus: RuleStatus | null; changed: boolean }> {
+}): Promise<{ previousStatus: InventoryStatus | null; changed: boolean }> {
   return withDbClient(async (client) => {
-    const current = await client.query<{ health_status: RuleStatus }>(
+    const current = await client.query<{ health_status: InventoryStatus }>(
       `
         SELECT health_status
         FROM inventory_node
@@ -90,9 +91,9 @@ export async function applyRackEnvironmentStatus(args: {
   zoneCode: string;
   rackCode: string;
   status: RuleStatus;
-}): Promise<{ previousStatus: RuleStatus | null; changed: boolean }> {
+}): Promise<{ previousStatus: InventoryStatus | null; changed: boolean }> {
   return withDbClient(async (client) => {
-    const current = await client.query<{ environment_status: RuleStatus }>(
+    const current = await client.query<{ environment_status: InventoryStatus }>(
       `
         SELECT environment_status
         FROM inventory_rack

@@ -6,6 +6,8 @@ export type AppEnv = {
   mqttConnectTimeoutMs: number;
   mqttReconnectPeriodMs: number;
   nodeEscalationGraceMs: number;
+  offlineTimeoutMs: number;
+  offlineSweepIntervalMs: number;
 };
 
 function getRequired(name: string): string {
@@ -36,6 +38,8 @@ export function loadEnv(): AppEnv {
     mqttClientId: process.env.MQTT_CLIENT_ID?.trim() || "backend-sedcm-ingesta",
     mqttConnectTimeoutMs: getNumber("MQTT_CONNECT_TIMEOUT_MS", 5000),
     mqttReconnectPeriodMs: getNumber("MQTT_RECONNECT_PERIOD_MS", 3000),
-    nodeEscalationGraceMs: getNumber("NODE_ESCALATION_GRACE_MS", 30000)
+    nodeEscalationGraceMs: getNumber("NODE_ESCALATION_GRACE_MS", 30000),
+    offlineTimeoutMs: getNumber("OFFLINE_TIMEOUT_MS", 30000),
+    offlineSweepIntervalMs: getNumber("OFFLINE_SWEEP_INTERVAL_MS", 10000)
   };
 }

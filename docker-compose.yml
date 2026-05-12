@@ -55,6 +55,8 @@ services:
       PGPASSWORD: postgres
       PGSSLMODE: disable
       NODE_ESCALATION_GRACE_MS: 30000
+      OFFLINE_TIMEOUT_MS: 30000
+      OFFLINE_SWEEP_INTERVAL_MS: 10000
     ports:
       - "3000:3000"
     healthcheck:

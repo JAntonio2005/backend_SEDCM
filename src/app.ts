@@ -5,15 +5,21 @@ import { connectMqttBroker } from "./bootstrap/mqtt";
 import { loadEnv } from "./config/env";
 import { activateTelemetrySubscriptions } from "./mqtt/subscriptions";
 import { closeDbPool, verifyDbConnection } from "./repositories/db";
+import { OfflineMonitorHandle, startOfflineMonitor } from "./rules/offline-monitor";
 
 let httpServer: Server | undefined;
 let mqttClient: MqttClient | undefined;
+let offlineMonitor: OfflineMonitorHandle | undefined;
 
 async function shutdown(signal: string): Promise<void> {
   console.log(JSON.stringify({ level: "info", event: "shutdown_signal", signal }));
 
   if (mqttClient) {
     mqttClient.end(true);
+  }
+
+  if (offlineMonitor) {
+    offlineMonitor.stop();
   }
 
   if (httpServer) {
@@ -54,6 +60,11 @@ async function main(): Promise<void> {
     nodeEscalationGraceMs: env.nodeEscalationGraceMs
   });
   console.log(JSON.stringify({ level: "info", event: "mqtt_subscriptions_activated" }));
+
+  offlineMonitor = startOfflineMonitor({
+    offlineTimeoutMs: env.offlineTimeoutMs,
+    sweepIntervalMs: env.offlineSweepIntervalMs
+  });
 }
 
 process.on("SIGINT", () => {
