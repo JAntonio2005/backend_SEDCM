@@ -1,6 +1,9 @@
 const mqtt = require("mqtt");
 
 const ALLOWED_ACTIONS = new Set(["soft_reboot", "hard_shutdown", "set_hvac_mode"]);
+const SOFT_REBOOT_TTL_MS = 30000;
+const HARD_SHUTDOWN_TTL_MS = 45000;
+const HVAC_COOLING_TTL_MS = 45000;
 
 function asPositiveNumber(raw, fallback) {
   if (!raw) return fallback;
@@ -19,6 +22,37 @@ function asObject(value) {
   return value;
 }
 
+function asNonEmptyString(value) {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed ? trimmed : null;
+}
+
+function deriveActuatorEffect(command) {
+  const action = asNonEmptyString(command.action);
+  const target = asObject(command.target) || null;
+  const mode = asNonEmptyString(command.mode);
+
+  if (action === "soft_reboot") {
+    return { effect: "cpu_cooldown", ttlMs: SOFT_REBOOT_TTL_MS, mode: null, target };
+  }
+
+  if (action === "hard_shutdown") {
+    return { effect: "node_shutdown", ttlMs: HARD_SHUTDOWN_TTL_MS, mode: null, target };
+  }
+
+  if (action === "set_hvac_mode") {
+    return {
+      effect: "environment_cooling",
+      ttlMs: HVAC_COOLING_TTL_MS,
+      mode: mode || "cooling",
+      target
+    };
+  }
+
+  return null;
+}
+
 function log(level, event, extra) {
   console.log(JSON.stringify({ level, event, ...extra }));
 }
@@ -34,6 +68,7 @@ const env = {
 
 const commandTopic = `dc/control/zona/${env.edgeZone}/rack/${env.edgeRack}`;
 const ackTopic = `dc/ack/zona/${env.edgeZone}/rack/${env.edgeRack}`;
+const actuatorTopic = `dc/actuator/zona/${env.edgeZone}/rack/${env.edgeRack}`;
 
 log("info", "edge_executor_started", {
   mqtt_url: env.mqttUrl,
@@ -43,7 +78,8 @@ log("info", "edge_executor_started", {
   ack_delay_ms: env.ackDelayMs,
   ack_mode: env.ackMode,
   command_topic: commandTopic,
-  ack_topic: ackTopic
+  ack_topic: ackTopic,
+  actuator_topic: actuatorTopic
 });
 
 const client = mqtt.connect(env.mqttUrl, {
@@ -136,6 +172,39 @@ client.on("message", (topic, payloadBuffer) => {
     action,
     message: simulationMessage
   });
+
+  const effectPayload = deriveActuatorEffect(cmd);
+  if (effectPayload) {
+    const actuatorPayload = {
+      command_id: commandId,
+      action,
+      ...(effectPayload.mode ? { mode: effectPayload.mode } : {}),
+      target: effectPayload.target,
+      effect: effectPayload.effect,
+      ttl_ms: effectPayload.ttlMs,
+      timestamp: new Date().toISOString()
+    };
+
+    client.publish(actuatorTopic, JSON.stringify(actuatorPayload), { qos: 0 }, (error) => {
+      if (error) {
+        log("error", "edge_actuator_effect_failed", {
+          topic: actuatorTopic,
+          command_id: commandId,
+          action,
+          message: error.message
+        });
+        return;
+      }
+
+      log("info", "edge_actuator_effect_published", {
+        topic: actuatorTopic,
+        command_id: commandId,
+        action,
+        effect: effectPayload.effect,
+        ttl_ms: effectPayload.ttlMs
+      });
+    });
+  }
 
   setTimeout(() => {
     const ackPayload = {

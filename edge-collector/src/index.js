@@ -1,10 +1,17 @@
 const mqtt = require("mqtt");
+const ACTUATOR_EFFECTS = new Set(["cpu_cooldown", "node_shutdown", "environment_cooling"]);
 
 function asPositiveNumber(raw, fallback) {
   if (!raw) return fallback;
   const value = Number(raw);
   if (!Number.isFinite(value) || value <= 0) return fallback;
   return value;
+}
+
+function asNonEmptyString(value) {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed ? trimmed : null;
 }
 
 function randInt(min, max) {
@@ -32,6 +39,13 @@ const env = {
 
 const nodeTopic = `dc/telemetria/zona/${env.edgeZone}/rack/${env.edgeRack}/nodo/${env.nodeId}`;
 const environmentTopic = `dc/telemetria/zona/${env.edgeZone}/rack/${env.edgeRack}/ambiente`;
+const actuatorTopic = `dc/actuator/zona/${env.edgeZone}/rack/${env.edgeRack}`;
+
+const activeEffects = {
+  cpuCooldown: null,
+  nodeShutdown: null,
+  environmentCooling: null
+};
 
 const SCENARIOS = new Set(["normal", "warning", "critical_node", "critical_environment"]);
 if (!SCENARIOS.has(env.scenario)) {
@@ -39,6 +53,15 @@ if (!SCENARIOS.has(env.scenario)) {
 }
 
 function buildNodeMetrics() {
+  if (activeEffects.cpuCooldown) {
+    return {
+      cpu_usage_pct: randInt(35, 55),
+      ram_usage_mb: randInt(1000, 2200),
+      net_rx_bytes_sec: randInt(400, 1700),
+      net_tx_bytes_sec: randInt(350, 1500)
+    };
+  }
+
   if (env.scenario === "warning") {
     return {
       cpu_usage_pct: randInt(80, 90),
@@ -66,6 +89,13 @@ function buildNodeMetrics() {
 }
 
 function buildEnvironmentMetrics() {
+  if (activeEffects.environmentCooling) {
+    return {
+      temperature_c: randInt(24, 28),
+      humidity_pct: randInt(45, 55)
+    };
+  }
+
   if (env.scenario === "warning") {
     return {
       temperature_c: randInt(30, 38),
@@ -109,6 +139,100 @@ function buildEnvironmentPayload() {
   };
 }
 
+function clearExpiredEffects() {
+  const now = Date.now();
+
+  for (const key of ["cpuCooldown", "nodeShutdown", "environmentCooling"]) {
+    const current = activeEffects[key];
+    if (!current) continue;
+
+    if (now >= current.expiresAtMs) {
+      log("info", "edge_actuator_effect_expired", {
+        command_id: current.commandId,
+        action: current.action,
+        effect: current.effect,
+        expired_at: new Date(now).toISOString()
+      });
+      activeEffects[key] = null;
+    }
+  }
+}
+
+function applyEffect(effectPayload) {
+  const commandId = asNonEmptyString(effectPayload.command_id);
+  const action = asNonEmptyString(effectPayload.action);
+  const effect = asNonEmptyString(effectPayload.effect);
+  const target = effectPayload.target && typeof effectPayload.target === "object" ? effectPayload.target : {};
+  const ttlMs = asPositiveNumber(effectPayload.ttl_ms, 30000);
+
+  if (!commandId || !action || !effect || !ACTUATOR_EFFECTS.has(effect)) {
+    log("warn", "edge_collector_error", {
+      stage: "actuator_effect",
+      message: "invalid_effect_payload",
+      payload: effectPayload
+    });
+    return;
+  }
+
+  const targetType = asNonEmptyString(target.target_type);
+  const targetId = asNonEmptyString(target.target_id);
+  const targetZone = asNonEmptyString(target.dc_zone);
+  const targetRack = asNonEmptyString(target.dc_rack);
+
+  if (targetZone && targetZone !== env.edgeZone) return;
+  if (targetRack && targetRack !== env.edgeRack) return;
+
+  const now = Date.now();
+  const expiresAtMs = now + ttlMs;
+
+  log("info", "edge_actuator_effect_received", {
+    command_id: commandId,
+    action,
+    effect,
+    ttl_ms: ttlMs,
+    target_type: targetType,
+    target_id: targetId
+  });
+
+  if (effect === "cpu_cooldown") {
+    if (targetType === "nodo" && targetId && targetId !== env.nodeId) return;
+
+    activeEffects.cpuCooldown = {
+      commandId,
+      action,
+      effect,
+      expiresAtMs
+    };
+  }
+
+  if (effect === "node_shutdown") {
+    if (targetType === "nodo" && targetId && targetId !== env.nodeId) return;
+
+    activeEffects.nodeShutdown = {
+      commandId,
+      action,
+      effect,
+      expiresAtMs
+    };
+  }
+
+  if (effect === "environment_cooling") {
+    activeEffects.environmentCooling = {
+      commandId,
+      action,
+      effect,
+      expiresAtMs
+    };
+  }
+
+  log("info", "edge_actuator_effect_applied", {
+    command_id: commandId,
+    action,
+    effect,
+    active_until: new Date(expiresAtMs).toISOString()
+  });
+}
+
 log("info", "edge_collector_started", {
   mqtt_url: env.mqttUrl,
   edge_zone: env.edgeZone,
@@ -119,7 +243,8 @@ log("info", "edge_collector_started", {
   node_interval_ms: env.nodeIntervalMs,
   env_interval_ms: env.envIntervalMs,
   node_topic: nodeTopic,
-  environment_topic: environmentTopic
+  environment_topic: environmentTopic,
+  actuator_topic: actuatorTopic
 });
 
 const client = mqtt.connect(env.mqttUrl, {
@@ -132,6 +257,25 @@ let nodeTimer = null;
 let envTimer = null;
 
 function publishNodeTelemetry() {
+  clearExpiredEffects();
+
+  if (activeEffects.nodeShutdown) {
+    log("info", "edge_node_shutdown_active", {
+      node_id: env.nodeId,
+      command_id: activeEffects.nodeShutdown.commandId,
+      active_until: new Date(activeEffects.nodeShutdown.expiresAtMs).toISOString()
+    });
+    return;
+  }
+
+  if (activeEffects.cpuCooldown) {
+    log("info", "edge_cpu_cooldown_active", {
+      node_id: env.nodeId,
+      command_id: activeEffects.cpuCooldown.commandId,
+      active_until: new Date(activeEffects.cpuCooldown.expiresAtMs).toISOString()
+    });
+  }
+
   const payload = buildNodePayload();
 
   client.publish(nodeTopic, JSON.stringify(payload), { qos: 0 }, (error) => {
@@ -152,6 +296,16 @@ function publishNodeTelemetry() {
 }
 
 function publishEnvironmentTelemetry() {
+  clearExpiredEffects();
+
+  if (activeEffects.environmentCooling) {
+    log("info", "edge_environment_cooling_active", {
+      rack_code: env.edgeRack,
+      command_id: activeEffects.environmentCooling.commandId,
+      active_until: new Date(activeEffects.environmentCooling.expiresAtMs).toISOString()
+    });
+  }
+
   const payload = buildEnvironmentPayload();
 
   client.publish(environmentTopic, JSON.stringify(payload), { qos: 0 }, (error) => {
@@ -174,6 +328,21 @@ function publishEnvironmentTelemetry() {
 client.on("connect", () => {
   log("info", "edge_collector_connected", { broker: env.mqttUrl });
 
+  client.subscribe(actuatorTopic, { qos: 0 }, (error) => {
+    if (error) {
+      log("error", "edge_collector_error", {
+        stage: "subscribe_actuator",
+        message: error.message,
+        topic: actuatorTopic
+      });
+      return;
+    }
+
+    log("info", "edge_collector_subscribed", {
+      topic: actuatorTopic
+    });
+  });
+
   publishNodeTelemetry();
   publishEnvironmentTelemetry();
 
@@ -189,6 +358,23 @@ client.on("error", (error) => {
     stage: "mqtt_client",
     message: error.message
   });
+});
+
+client.on("message", (topic, payloadBuffer) => {
+  if (topic !== actuatorTopic) return;
+
+  const payloadText = payloadBuffer.toString("utf8");
+
+  try {
+    const parsed = JSON.parse(payloadText);
+    applyEffect(parsed);
+  } catch (error) {
+    log("error", "edge_collector_error", {
+      stage: "parse_actuator_effect",
+      message: error instanceof Error ? error.message : String(error),
+      topic
+    });
+  }
 });
 
 function shutdown(signal) {
